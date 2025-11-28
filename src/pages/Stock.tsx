@@ -44,10 +44,10 @@ export function Stock() {
 
   const loadStockSummary = async () => {
     try {
+      // Get all products (don't filter by stock yet)
       const { data, error } = await supabase
         .from('product_stock_summary')
         .select('*')
-        .gt('total_current_stock', 0)
         .order('product_name');
 
       if (error) throw error;
@@ -72,7 +72,12 @@ export function Stock() {
         })
       );
 
-      setStockSummary(productsWithReserved);
+      // Filter: show products with stock > 0 OR reserved > 0
+      const filteredProducts = productsWithReserved.filter(
+        p => p.total_current_stock > 0 || p.reserved_quantity > 0
+      );
+
+      setStockSummary(filteredProducts);
     } catch (error) {
       console.error('Error loading stock summary:', error);
     } finally {
