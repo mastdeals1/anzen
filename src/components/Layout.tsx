@@ -23,7 +23,6 @@ import {
   FileText,
   ClipboardCheck,
   TrendingUp,
-  BarChart3,
 } from 'lucide-react';
 import logo from '../assets/Untitled-1.svg';
 
@@ -59,7 +58,6 @@ export function Layout({ children }: LayoutProps) {
     { id: 'sales', label: t('nav.sales'), icon: ShoppingCart, roles: ['admin', 'accounts', 'sales'] },
     { id: 'import-requirements', label: 'Import Requirements', icon: TrendingUp, roles: ['admin', 'warehouse', 'sales'] },
     { id: 'finance', label: t('nav.finance'), icon: DollarSign, roles: ['admin', 'accounts'] },
-    { id: 'ageing-report', label: 'Ageing Report', icon: BarChart3, roles: ['admin', 'accounts'] },
     { id: 'crm', label: t('nav.crm'), icon: UserCircle, roles: ['admin', 'sales'] },
     { id: 'command-center', label: 'Command Center', icon: Zap, roles: ['admin', 'sales'] },
     { id: 'tasks', label: 'Tasks', icon: CheckSquare, roles: ['admin', 'accounts', 'sales', 'warehouse'] },

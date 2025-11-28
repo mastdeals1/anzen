@@ -13,6 +13,8 @@ interface StockSummary {
   unit: string;
   category: string;
   total_current_stock: number;
+  reserved_quantity: number;
+  available_quantity: number;
   active_batch_count: number;
   expired_batch_count: number;
   nearest_expiry_date: string | null;
@@ -22,6 +24,8 @@ interface DetailedBatch {
   id: string;
   batch_number: string;
   current_stock: number;
+  reserved_quantity: number;
+  available_quantity: number;
   expiry_date: string | null;
   import_date: string;
 }
@@ -47,7 +51,28 @@ export function Stock() {
         .order('product_name');
 
       if (error) throw error;
-      setStockSummary(data || []);
+
+      // Get reserved quantities for each product
+      const productsWithReserved = await Promise.all(
+        (data || []).map(async (product) => {
+          const { data: reservedData } = await supabase
+            .from('stock_reservations')
+            .select('reserved_quantity')
+            .eq('product_id', product.product_id)
+            .eq('status', 'active');
+
+          const reserved_quantity = reservedData?.reduce((sum, r) => sum + Number(r.reserved_quantity), 0) || 0;
+          const available_quantity = product.total_current_stock - reserved_quantity;
+
+          return {
+            ...product,
+            reserved_quantity,
+            available_quantity
+          };
+        })
+      );
+
+      setStockSummary(productsWithReserved);
     } catch (error) {
       console.error('Error loading stock summary:', error);
     } finally {
@@ -66,7 +91,28 @@ export function Stock() {
         .order('expiry_date', { ascending: true, nullsFirst: false });
 
       if (error) throw error;
-      setProductBatches(data || []);
+
+      // Get reserved quantities for each batch
+      const batchesWithReserved = await Promise.all(
+        (data || []).map(async (batch) => {
+          const { data: reservedData } = await supabase
+            .from('stock_reservations')
+            .select('reserved_quantity')
+            .eq('batch_id', batch.id)
+            .eq('status', 'active');
+
+          const reserved_quantity = reservedData?.reduce((sum, r) => sum + Number(r.reserved_quantity), 0) || 0;
+          const available_quantity = batch.current_stock - reserved_quantity;
+
+          return {
+            ...batch,
+            reserved_quantity,
+            available_quantity
+          };
+        })
+      );
+
+      setProductBatches(batchesWithReserved);
     } catch (error) {
       console.error('Error loading product batches:', error);
     }
@@ -112,10 +158,28 @@ export function Stock() {
     },
     {
       key: 'stock',
-      label: 'Stock',
+      label: 'Total Stock',
       render: (item: StockSummary) => (
         <span className={`font-semibold ${getStockStatusColor(item.total_current_stock, item.active_batch_count)}`}>
           {item.total_current_stock.toLocaleString()} {item.unit}
+        </span>
+      )
+    },
+    {
+      key: 'reserved',
+      label: 'Reserved',
+      render: (item: StockSummary) => (
+        <span className="text-orange-600 font-medium">
+          {item.reserved_quantity > 0 ? `${item.reserved_quantity.toLocaleString()} ${item.unit}` : '-'}
+        </span>
+      )
+    },
+    {
+      key: 'available',
+      label: 'Available',
+      render: (item: StockSummary) => (
+        <span className="text-green-600 font-semibold">
+          {item.available_quantity.toLocaleString()} {item.unit}
         </span>
       )
     },
@@ -162,10 +226,28 @@ export function Stock() {
       )
     },
     {
-      key: 'stock',
-      label: 'Stock',
+      key: 'total_stock',
+      label: 'Total',
       render: (batch: DetailedBatch) => (
         <span className="font-semibold text-sm">{batch.current_stock.toLocaleString()} {selectedProduct?.unit}</span>
+      )
+    },
+    {
+      key: 'reserved',
+      label: 'Reserved',
+      render: (batch: DetailedBatch) => (
+        <span className="text-orange-600 font-medium text-sm">
+          {batch.reserved_quantity > 0 ? `${batch.reserved_quantity.toLocaleString()} ${selectedProduct?.unit}` : '-'}
+        </span>
+      )
+    },
+    {
+      key: 'available',
+      label: 'Available',
+      render: (batch: DetailedBatch) => (
+        <span className="text-green-600 font-semibold text-sm">
+          {batch.available_quantity.toLocaleString()} {selectedProduct?.unit}
+        </span>
       )
     },
     {

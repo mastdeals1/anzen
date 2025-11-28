@@ -9,6 +9,7 @@ import { Plus, Edit, Trash2, DollarSign, TrendingUp, TrendingDown, CreditCard, R
 import { BankAccountsManager } from '../components/finance/BankAccountsManager';
 import { ReceivablesManager } from '../components/finance/ReceivablesManager';
 import { PayablesManager } from '../components/finance/PayablesManager';
+import { AgeingReport } from './reports/AgeingReport';
 import { FileUpload } from '../components/FileUpload';
 
 interface FinanceExpense {
@@ -30,7 +31,7 @@ interface Batch {
   batch_number: string;
 }
 
-type FinanceTab = 'expenses' | 'banks' | 'receivables' | 'payables';
+type FinanceTab = 'expenses' | 'banks' | 'receivables' | 'payables' | 'ageing';
 
 export function Finance() {
   const { t } = useLanguage();
@@ -246,6 +247,7 @@ export function Finance() {
     { id: 'banks', label: 'Bank Accounts', icon: CreditCard },
     { id: 'receivables', label: 'Receivables', icon: TrendingUp },
     { id: 'payables', label: 'Payables', icon: TrendingDown },
+    { id: 'ageing', label: 'Ageing Report', icon: DollarSign },
   ];
 
   return (
@@ -532,6 +534,10 @@ export function Finance() {
 
             {activeTab === 'payables' && (
               <PayablesManager canManage={canManage} />
+            )}
+
+            {activeTab === 'ageing' && (
+              <AgeingReport />
             )}
           </div>
         </div>
