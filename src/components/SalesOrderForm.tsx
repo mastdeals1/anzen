@@ -169,8 +169,24 @@ export default function SalesOrderForm({ onSuccess, onCancel }: SalesOrderFormPr
   const handleItemChange = (index: number, field: keyof OrderItem, value: any) => {
     const newItems = [...items];
     newItems[index] = { ...newItems[index], [field]: value };
+
+    const item = newItems[index];
+    const subtotal = item.quantity * item.unit_price;
+    const discountAmount = item.discount_percent > 0
+      ? (subtotal * item.discount_percent) / 100
+      : item.discount_amount;
+    const afterDiscount = subtotal - discountAmount;
+    const taxAmount = (afterDiscount * item.tax_percent) / 100;
+    const lineTotal = afterDiscount + taxAmount;
+
+    newItems[index] = {
+      ...item,
+      discount_amount: discountAmount,
+      tax_amount: taxAmount,
+      line_total: lineTotal,
+    };
+
     setItems(newItems);
-    calculateLineTotal(index);
   };
 
   const addItem = () => {
@@ -459,8 +475,16 @@ export default function SalesOrderForm({ onSuccess, onCancel }: SalesOrderFormPr
                       const val = e.target.value;
                       if (val === '') {
                         handleItemChange(index, 'quantity', 0);
-                      } else if (!isNaN(parseFloat(val))) {
-                        handleItemChange(index, 'quantity', parseFloat(val));
+                      } else {
+                        const num = parseFloat(val);
+                        if (!isNaN(num)) {
+                          handleItemChange(index, 'quantity', num);
+                        }
+                      }
+                    }}
+                    onBlur={(e) => {
+                      if (e.target.value === '') {
+                        handleItemChange(index, 'quantity', 0);
                       }
                     }}
                     className="w-full border rounded px-2 py-1 text-sm"
@@ -478,8 +502,16 @@ export default function SalesOrderForm({ onSuccess, onCancel }: SalesOrderFormPr
                       const val = e.target.value;
                       if (val === '') {
                         handleItemChange(index, 'unit_price', 0);
-                      } else if (!isNaN(parseFloat(val))) {
-                        handleItemChange(index, 'unit_price', parseFloat(val));
+                      } else {
+                        const num = parseFloat(val);
+                        if (!isNaN(num)) {
+                          handleItemChange(index, 'unit_price', num);
+                        }
+                      }
+                    }}
+                    onBlur={(e) => {
+                      if (e.target.value === '') {
+                        handleItemChange(index, 'unit_price', 0);
                       }
                     }}
                     className="w-full border rounded px-2 py-1 text-sm"
@@ -496,8 +528,16 @@ export default function SalesOrderForm({ onSuccess, onCancel }: SalesOrderFormPr
                       const val = e.target.value;
                       if (val === '') {
                         handleItemChange(index, 'discount_percent', 0);
-                      } else if (!isNaN(parseFloat(val)) && parseFloat(val) >= 0 && parseFloat(val) <= 100) {
-                        handleItemChange(index, 'discount_percent', parseFloat(val));
+                      } else {
+                        const num = parseFloat(val);
+                        if (!isNaN(num) && num >= 0 && num <= 100) {
+                          handleItemChange(index, 'discount_percent', num);
+                        }
+                      }
+                    }}
+                    onBlur={(e) => {
+                      if (e.target.value === '') {
+                        handleItemChange(index, 'discount_percent', 0);
                       }
                     }}
                     className="w-full border rounded px-2 py-1 text-sm"
@@ -514,8 +554,16 @@ export default function SalesOrderForm({ onSuccess, onCancel }: SalesOrderFormPr
                       const val = e.target.value;
                       if (val === '') {
                         handleItemChange(index, 'tax_percent', 0);
-                      } else if (!isNaN(parseFloat(val)) && parseFloat(val) >= 0 && parseFloat(val) <= 100) {
-                        handleItemChange(index, 'tax_percent', parseFloat(val));
+                      } else {
+                        const num = parseFloat(val);
+                        if (!isNaN(num) && num >= 0 && num <= 100) {
+                          handleItemChange(index, 'tax_percent', num);
+                        }
+                      }
+                    }}
+                    onBlur={(e) => {
+                      if (e.target.value === '') {
+                        handleItemChange(index, 'tax_percent', 0);
                       }
                     }}
                     className="w-full border rounded px-2 py-1 text-sm"
