@@ -65,6 +65,7 @@ Deno.serve(async (req: Request) => {
     
     const text = await extractTextFromPDF(uint8Array);
     console.log('Extracted text length:', text.length);
+    console.log('Sample:', text.substring(0, 500));
     
     const parsed = parseBCAStatement(text, bankAccount.currency);
     
@@ -230,26 +231,37 @@ function parseBCAStatement(text: string, currency: string) {
   }
 
   const transactions: ParsedTransaction[] = [];
-  const lines = text.split(/TANGGAL[\s]+KETERANGAN[\s]+CBG[\s]+MUTASI[\s]+SALDO/i);
   
-  if (lines.length < 2) {
-    throw new Error('Could not find transaction table in PDF');
-  }
-
-  const transactionText = lines[1];
-  const linePattern = /(\d{2})\/(\d{2})[\s]+([A-Z][A-Za-z\s\-\/\.]+?)[\s]+(\d{1,3}(?:[,\.]\d{3})*(?:[,\.]\d{2})?)[\s]+(DB|CR)?[\s]*(\d{1,3}(?:[,\.]\d{3})*(?:[,\.]\d{2})?)?/gi;
+  // Pattern: DD/MM followed by description, amount, maybe DB/CR, maybe balance
+  // More flexible - just look for DD/MM anywhere in the text
+  const linePattern = /(\d{2})\/(\d{2})[\s]+([^\d]+?)[\s]+(\d{1,3}(?:[,\.]\d{3})*(?:[,\.]\d{2})?)[\s]*(DB|CR)?[\s]*(\d{1,3}(?:[,\.]\d{3})*(?:[,\.]\d{2})?)?/gi;
   
   let match;
-  while ((match = linePattern.exec(transactionText)) !== null) {
+  while ((match = linePattern.exec(text)) !== null) {
     const day = match[1];
     const month = match[2];
-    const desc = match[3].trim();
+    let desc = match[3].trim();
     const amountStr = match[4];
     const indicator = match[5];
     const balanceStr = match[6];
 
-    if (parseInt(day) > 31 || parseInt(month) > 12 || parseInt(day) < 1 || parseInt(month) < 1) {
+    // Validate date
+    const dayNum = parseInt(day);
+    const monthNumParsed = parseInt(month);
+    
+    if (dayNum > 31 || monthNumParsed > 12 || dayNum < 1 || monthNumParsed < 1) {
       continue;
+    }
+
+    // Skip header lines
+    if (desc.match(/TANGGAL|KETERANGAN|MUTASI|SALDO/i)) {
+      continue;
+    }
+
+    // Clean description
+    desc = desc.replace(/[^A-Za-z0-9\s\-\/\.]/g, ' ').trim();
+    if (desc.length < 3) {
+      desc = 'Transaction';
     }
 
     const fullDate = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
@@ -272,7 +284,7 @@ function parseBCAStatement(text: string, currency: string) {
   const totalDebits = transactions.reduce((sum, t) => sum + t.debitAmount, 0);
   const totalCredits = transactions.reduce((sum, t) => sum + t.creditAmount, 0);
 
-  console.log(`Parsed: ${transactions.length} transactions, DR: ${totalDebits}, CR: ${totalCredits}`);
+  console.log(`Parsed: ${transactions.length} transactions, DR: ${totalDebits.toFixed(2)}, CR: ${totalCredits.toFixed(2)}`);
 
   return {
     period,
