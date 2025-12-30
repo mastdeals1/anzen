@@ -108,7 +108,6 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
           vendor_name,
           status
         `)
-        .in('status', ['draft', 'approved'])
         .order('expense_date', { ascending: false })
         .limit(100);
 
@@ -873,16 +872,25 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
                         name="expense_id"
                         required
                         className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
+                        disabled={expenses.filter(exp => exp.currency === recordingLine.currency).length === 0}
                       >
-                        <option value="">Choose an expense...</option>
+                        <option value="">
+                          {expenses.filter(exp => exp.currency === recordingLine.currency).length === 0
+                            ? `No expenses found in ${recordingLine.currency}`
+                            : 'Choose an expense...'}
+                        </option>
                         {expenses.filter(exp => exp.currency === recordingLine.currency).map(expense => (
                           <option key={expense.id} value={expense.id}>
-                            {new Date(expense.expense_date).toLocaleDateString('id-ID')} - {expense.vendor_name || expense.description} - {getCurrencySymbol(expense.currency)} {expense.amount.toLocaleString('id-ID')}
+                            {new Date(expense.expense_date).toLocaleDateString('id-ID')} - {expense.vendor_name || expense.description} - {getCurrencySymbol(expense.currency)} {expense.amount.toLocaleString('id-ID')} {expense.status ? `[${expense.status}]` : ''}
                           </option>
                         ))}
                       </select>
                       <p className="text-xs text-gray-500 mt-1">
-                        Showing {expenses.filter(exp => exp.currency === recordingLine.currency).length} expenses in {recordingLine.currency}
+                        {expenses.filter(exp => exp.currency === recordingLine.currency).length > 0 ? (
+                          <>Showing {expenses.filter(exp => exp.currency === recordingLine.currency).length} expenses in {recordingLine.currency}</>
+                        ) : (
+                          <>No expenses found in {recordingLine.currency}. Total expenses loaded: {expenses.length} (other currencies)</>
+                        )}
                       </p>
                     </div>
                     <button
