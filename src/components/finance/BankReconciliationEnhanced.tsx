@@ -455,22 +455,36 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
         continue;
       }
 
-      const dateStr = String(dateVal).trim();
-      const dateMatch = dateStr.match(/^(\d{1,2})\/(\d{1,2})$/);
-      if (!dateMatch) {
-        skippedCount++;
-        if (i < headerRowIdx + 5) console.log(`⏭️ Row ${i}: Date doesn't match pattern: "${dateStr}"`);
-        continue;
+      let parsedDate = '';
+
+      if (typeof dateVal === 'number') {
+        const excelEpoch = new Date(1900, 0, 1);
+        const daysOffset = dateVal - 2;
+        const jsDate = new Date(excelEpoch.getTime() + daysOffset * 24 * 60 * 60 * 1000);
+        parsedDate = `${jsDate.getFullYear()}-${String(jsDate.getMonth() + 1).padStart(2, '0')}-${String(jsDate.getDate()).padStart(2, '0')}`;
+
+        if (i < headerRowIdx + 5) console.log(`✅ Row ${i}: Excel serial ${dateVal} → ${parsedDate}`);
+        processedCount++;
+      } else {
+        const dateStr = String(dateVal).trim();
+        const dateMatch = dateStr.match(/^(\d{1,2})\/(\d{1,2})$/);
+        if (!dateMatch) {
+          skippedCount++;
+          if (i < headerRowIdx + 5) console.log(`⏭️ Row ${i}: Date doesn't match pattern: "${dateStr}"`);
+          continue;
+        }
+
+        const day = parseInt(dateMatch[1]);
+        const mon = parseInt(dateMatch[2]);
+
+        if (day < 1 || day > 31 || mon < 1 || mon > 12) {
+          skippedCount++;
+          continue;
+        }
+
+        parsedDate = `${year}-${String(mon).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        processedCount++;
       }
-
-      processedCount++;
-
-      const day = parseInt(dateMatch[1]);
-      const mon = parseInt(dateMatch[2]);
-
-      if (day < 1 || day > 31 || mon < 1 || mon > 12) continue;
-
-      const parsedDate = `${year}-${String(mon).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 
       const amountStr = String(row[amountCol] || '').trim();
       const isCR = amountStr.includes(' CR');
@@ -606,22 +620,27 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
         }
 
         if (matchedExpense) {
-          // Update the line with matched expense
-          await supabase
+          const { error: updateError } = await supabase
             .from('bank_statement_lines')
             .update({
               matched_expense_id: matchedExpense.id,
               reconciliation_status: 'suggested',
               notes: `Auto-matched: ${matchedExpense.description}`,
             })
-            .eq('id', line.id);
+            .eq('id', line.id)
+            .select()
+            .single();
 
-          matchCount++;
+          if (updateError) {
+            console.error(`Failed to update line ${line.id}:`, updateError);
+          } else {
+            matchCount++;
+          }
         }
       }
 
+      await loadStatementLines();
       alert(`✅ Auto-match complete!\nMatched ${matchCount} out of ${lines.length} transactions`);
-      loadStatementLines();
     } catch (err: any) {
       console.error('Error auto-matching:', err);
       alert('❌ Auto-match failed: ' + err.message);
@@ -709,8 +728,7 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
 
       if (expenseError) throw expenseError;
 
-      // Mark line as recorded
-      await supabase
+      const { error: updateError } = await supabase
         .from('bank_statement_lines')
         .update({
           reconciliation_status: 'recorded',
@@ -718,11 +736,15 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
           matched_at: new Date().toISOString(),
           matched_by: user.id,
         })
-        .eq('id', line.id);
+        .eq('id', line.id)
+        .select()
+        .single();
+
+      if (updateError) throw updateError;
 
       setRecordModal(false);
       setRecordingLine(null);
-      loadStatementLines();
+      await loadStatementLines();
       alert('✅ Expense recorded and linked successfully');
     } catch (error: any) {
       console.error('Error recording expense:', error);
@@ -735,8 +757,7 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      // Link to existing expense
-      await supabase
+      const { error: updateError } = await supabase
         .from('bank_statement_lines')
         .update({
           reconciliation_status: 'matched',
@@ -744,12 +765,16 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
           matched_at: new Date().toISOString(),
           matched_by: user.id,
         })
-        .eq('id', line.id);
+        .eq('id', line.id)
+        .select()
+        .single();
+
+      if (updateError) throw updateError;
 
       setRecordModal(false);
       setRecordingLine(null);
       setLinkToExpense(false);
-      loadStatementLines();
+      await loadStatementLines();
       alert('✅ Linked to expense successfully');
     } catch (error: any) {
       console.error('Error linking to expense:', error);
@@ -765,8 +790,7 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
       // Record as receipt - simplified
       // Full implementation would create proper receipt voucher
 
-      // Mark line as recorded
-      await supabase
+      const { error: updateError } = await supabase
         .from('bank_statement_lines')
         .update({
           reconciliation_status: 'recorded',
@@ -774,7 +798,11 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
           matched_at: new Date().toISOString(),
           matched_by: user.id,
         })
-        .eq('id', line.id);
+        .eq('id', line.id)
+        .select()
+        .single();
+
+      if (updateError) throw updateError;
 
       setRecordModal(false);
       setRecordingLine(null);
