@@ -273,10 +273,19 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
           const worksheet = workbook.Sheets[sheetName];
           const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
 
+          console.log('📊 Raw Excel data rows:', jsonData.length);
+          console.log('📋 First 10 rows:', jsonData.slice(0, 10));
+
           const { lines, metadata } = parseStatementDataWithMetadata(jsonData);
 
+          console.log('✅ Parsed lines:', lines.length);
+          console.log('📈 Metadata:', metadata);
+          if (lines.length > 0) {
+            console.log('🔍 First 3 transactions:', lines.slice(0, 3));
+          }
+
           if (lines.length === 0) {
-            alert('No valid transactions found in the file.');
+            alert('❌ No valid transactions found in the file. Check browser console (F12) for details.');
             return;
           }
 
@@ -391,9 +400,12 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
       }
     }
 
+    console.log('🔍 Header row index:', headerRowIdx);
+
     if (headerRowIdx === -1) {
-      console.error('Could not find BCA column headers');
-      return [];
+      console.error('❌ Could not find BCA column headers (looking for "Tanggal Transaksi")');
+      console.log('📋 Checked rows:', rows.slice(0, 20).map((r, i) => `Row ${i}: ${r[0]}`));
+      return { lines, metadata };
     }
 
     const headerRow = rows[headerRowIdx];
@@ -408,14 +420,23 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
       if (cellStr.includes('saldo')) balanceCol = idx;
     });
 
+    console.log('📍 Column positions:', { dateCol, descCol, branchCol, amountCol, balanceCol });
+
     if (dateCol === -1 || descCol === -1 || amountCol === -1) {
-      console.error('Missing required columns', { dateCol, descCol, amountCol });
-      return [];
+      console.error('❌ Missing required columns', { dateCol, descCol, amountCol });
+      console.log('📋 Header row:', headerRow);
+      return { lines, metadata };
     }
+
+    let processedCount = 0;
+    let skippedCount = 0;
 
     for (let i = headerRowIdx + 1; i < rows.length; i++) {
       const row = rows[i];
-      if (!row || row.length === 0) continue;
+      if (!row || row.length === 0) {
+        skippedCount++;
+        continue;
+      }
 
       const firstCell = String(row[0] || '');
 
@@ -423,15 +444,26 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
           firstCell.includes('Mutasi Debet') ||
           firstCell.includes('Mutasi Kredit') ||
           firstCell.includes('Saldo Akhir')) {
+        console.log(`⏹️ Stopped at footer row ${i}: ${firstCell}`);
         break;
       }
 
       const dateVal = row[dateCol];
-      if (!dateVal) continue;
+      if (!dateVal) {
+        skippedCount++;
+        if (i < headerRowIdx + 5) console.log(`⏭️ Row ${i}: No date value`);
+        continue;
+      }
 
       const dateStr = String(dateVal).trim();
       const dateMatch = dateStr.match(/^(\d{1,2})\/(\d{1,2})$/);
-      if (!dateMatch) continue;
+      if (!dateMatch) {
+        skippedCount++;
+        if (i < headerRowIdx + 5) console.log(`⏭️ Row ${i}: Date doesn't match pattern: "${dateStr}"`);
+        continue;
+      }
+
+      processedCount++;
 
       const day = parseInt(dateMatch[1]);
       const mon = parseInt(dateMatch[2]);
@@ -475,6 +507,8 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
         status: 'unmatched',
       });
     }
+
+    console.log(`✅ Parsing complete: ${lines.length} transactions, ${skippedCount} rows skipped`);
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
