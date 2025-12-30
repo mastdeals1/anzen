@@ -64,23 +64,37 @@ Deno.serve(async (req: Request) => {
     const arrayBuffer = await file.arrayBuffer();
     const uint8Array = new Uint8Array(arrayBuffer);
 
-    const text = extractTextFromPDF(uint8Array);
+    let text = extractTextFromPDF(uint8Array);
     console.log('[INFO] Extracted', text.length, 'chars');
+
+    const isGarbage = isGarbageText(text);
+    const hasBCAMarkers = text.includes('PERIODE') || text.includes('SALDO') || text.includes('BCA');
+
+    console.log('[CHECK] Is garbage:', isGarbage, 'Has BCA markers:', hasBCAMarkers);
+
+    if (isGarbage || !hasBCAMarkers) {
+      throw new Error(
+        'PDF text extraction failed - this appears to be an image-based or encrypted PDF. ' +
+        'This BCA statement cannot be automatically parsed. Please either: ' +
+        '1) Request text-enabled PDF from BCA, ' +
+        '2) Use "Download as Excel" from BCA e-Banking, or ' +
+        '3) Manually enter transactions using the Excel upload template.'
+      );
+    }
+
     console.log('[DEBUG] First 500 chars:', text.substring(0, 500));
     console.log('[DEBUG] Has PERIODE:', text.includes('PERIODE'));
     console.log('[DEBUG] Has SALDO:', text.includes('SALDO'));
-    console.log('[DEBUG] Has date pattern:', /\d{2}\/\d{2}/.test(text));
-
-    if (text.length < 100) {
-      throw new Error(`PDF text extraction failed. Only extracted ${text.length} chars. This PDF may be image-based or encrypted. Please try: 1) Saving as text-enabled PDF, 2) Using Excel export, or 3) Contact support for OCR-based parsing.`);
-    }
 
     const parsed = parseBCAStatement(text, bankAccount.currency);
 
     if (!parsed.transactions || parsed.transactions.length === 0) {
       console.error('[ERROR] Parser found no transactions. Text length:', text.length);
       console.error('[ERROR] Text sample:', text.substring(0, 1000));
-      throw new Error('No transactions found in PDF. Please ensure this is a valid BCA bank statement.');
+      throw new Error(
+        'No transactions found in PDF. The document structure may not match BCA format. ' +
+        'Please use Excel export or manual entry.'
+      );
     }
 
     const fileName = `${bankAccountId}/${Date.now()}_${file.name}`;
@@ -162,6 +176,23 @@ Deno.serve(async (req: Request) => {
     );
   }
 });
+
+function isGarbageText(text: string): boolean {
+  if (text.length < 100) return true;
+
+  const sample = text.substring(0, 1000);
+  let nonPrintableCount = 0;
+
+  for (let i = 0; i < sample.length; i++) {
+    const code = sample.charCodeAt(i);
+    if (code < 32 && code !== 10 && code !== 13) {
+      nonPrintableCount++;
+    }
+  }
+
+  const ratio = nonPrintableCount / sample.length;
+  return ratio > 0.15;
+}
 
 function extractTextFromPDF(pdfData: Uint8Array): string {
   const decoder = new TextDecoder('utf-8', { fatal: false });
