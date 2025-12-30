@@ -132,14 +132,11 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
 
     setUploading(true);
     try {
-      // Only Excel/CSV supported
       if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-        alert('⚠️ PDF import is not supported.\n\n✅ Please export your statement to Excel/CSV:\n\n📌 BCA Online Banking:\n1. Login → Rekening → Mutasi Rekening\n2. Select date range\n3. Click "Download" → Choose Excel format\n4. Upload the Excel file here');
-        setUploading(false);
-        if (fileInputRef.current) fileInputRef.current.value = '';
-        return;
+        await handlePDFUpload(file);
+      } else {
+        await handleExcelUpload(file);
       }
-      await handleExcelUpload(file);
     } finally {
       setUploading(false);
       if (fileInputRef.current) {
@@ -507,7 +504,7 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".xlsx,.xls,.csv"
+                  accept=".pdf,.xlsx,.xls,.csv"
                   onChange={handleFileUpload}
                   className="hidden"
                 />
@@ -515,10 +512,10 @@ export function BankReconciliationEnhanced({ canManage }: BankReconciliationEnha
                   onClick={() => fileInputRef.current?.click()}
                   disabled={uploading || !selectedBank}
                   className="flex items-center gap-1 px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
-                  title="Download statement as Excel from your bank's online banking"
+                  title="Upload BCA statement PDF or Excel/CSV from online banking"
                 >
                   <Upload className="w-4 h-4" />
-                  {uploading ? 'Uploading...' : 'Upload Excel/CSV'}
+                  {uploading ? 'Uploading...' : 'Upload PDF/Excel'}
                 </button>
               </>
             )}
