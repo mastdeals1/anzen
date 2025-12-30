@@ -66,20 +66,10 @@ Deno.serve(async (req: Request) => {
 
     const text = extractTextFromPDF(uint8Array);
     console.log('[INFO] Extracted', text.length, 'chars');
-    console.log('[DEBUG] First 1000 chars:', text.substring(0, 1000));
 
     const parsed = parseBCAStatement(text, bankAccount.currency);
 
     if (!parsed.transactions || parsed.transactions.length === 0) {
-      const debugInfo = {
-        textLength: text.length,
-        sample: text.substring(0, 1000),
-        hasSaldo: text.includes('SALDO'),
-        hasPeriode: text.includes('PERIODE'),
-        hasDate: /\d{2}\/\d{2}/.test(text),
-        dateMatches: text.match(/\d{2}\/\d{2}/g)?.slice(0, 10),
-      };
-      console.error('[ERROR] No transactions found:', JSON.stringify(debugInfo, null, 2));
       throw new Error('No transactions found in PDF. Please ensure this is a valid BCA bank statement.');
     }
 
@@ -173,7 +163,7 @@ function extractTextFromPDF(pdfData: Uint8Array): string {
   while ((match = textPattern.exec(raw)) !== null) {
     let text = match[1];
     text = text
-      .replace(/\\n/g, ' ')
+      .replace(/\\n/g, '\n')
       .replace(/\\r/g, '')
       .replace(/\\t/g, ' ')
       .replace(/\\\\/g, '\\')
@@ -182,12 +172,10 @@ function extractTextFromPDF(pdfData: Uint8Array): string {
     parts.push(text);
   }
 
-  return parts.join(' ');
+  return parts.join('\n');
 }
 
 function parseBCAStatement(text: string, currency: string) {
-  text = text.replace(/\s+/g, ' ').trim();
-
   let period = '';
   let year = new Date().getFullYear();
   let month = 1;
@@ -215,46 +203,58 @@ function parseBCAStatement(text: string, currency: string) {
   const lastDay = new Date(year, month, 0).getDate();
   const endDate = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
 
+  const lines = text.split(/\n/).map(l => l.trim()).filter(l => l.length > 0);
+  console.log(`[PARSE] Found ${lines.length} lines`);
+
   const transactions: ParsedTransaction[] = [];
+  let i = 0;
 
-  const words = text.split(/\s+/);
-  console.log(`[PARSE] Split into ${words.length} words`);
+  while (i < lines.length) {
+    const line = lines[i];
 
-  let datesFound = 0;
-  for (let i = 0; i < words.length; i++) {
-    const dateMatch = words[i].match(/^(\d{2})\/(\d{2})$/);
-    if (!dateMatch) continue;
-    datesFound++;
+    const dateMatch = line.match(/^(\d{2})\/(\d{2})$/);
+    if (!dateMatch) {
+      i++;
+      continue;
+    }
 
     const day = parseInt(dateMatch[1]);
     const mon = parseInt(dateMatch[2]);
-    if (day < 1 || day > 31 || mon < 1 || mon > 12) continue;
 
+    if (day < 1 || day > 31 || mon < 1 || mon > 12) {
+      i++;
+      continue;
+    }
+
+    const blockLines: string[] = [];
     let j = i + 1;
-    let endPos = Math.min(i + 50, words.length);
 
-    for (let k = i + 1; k < endPos; k++) {
-      if (words[k].match(/^\d{2}\/\d{2}$/)) {
-        const nextDay = parseInt(words[k].split('/')[0]);
-        const nextMon = parseInt(words[k].split('/')[1]);
-        if (nextDay >= 1 && nextDay <= 31 && nextMon >= 1 && nextMon <= 12) {
-          endPos = k;
+    while (j < lines.length) {
+      const nextLine = lines[j];
+
+      if (nextLine.match(/^\d{2}\/\d{2}$/)) {
+        const testDay = parseInt(nextLine.split('/')[0]);
+        const testMon = parseInt(nextLine.split('/')[1]);
+        if (testDay >= 1 && testDay <= 31 && testMon >= 1 && testMon <= 12) {
           break;
         }
       }
+
+      blockLines.push(nextLine);
+      j++;
+
+      if (blockLines.length > 30) break;
     }
 
-    const txnWords = words.slice(i + 1, endPos);
-    const fullText = txnWords.join(' ');
+    const fullText = blockLines.join(' ');
 
-    if (datesFound <= 3) console.log(`[DATE ${day}/${mon}] Text: ${fullText.substring(0, 150)}`);
-
-    if (fullText.match(/TANGGAL|KETERANGAN|CABANG|MUTASI|SALDO|Halaman/i)) {
-      if (datesFound <= 3) console.log(`[SKIP] Header keyword found`);
+    if (fullText.match(/TANGGAL|KETERANGAN|CABANG|MUTASI|SALDO|Halaman|Bersambung/i)) {
+      i = j;
       continue;
     }
+
     if (fullText.trim().length < 3) {
-      if (datesFound <= 3) console.log(`[SKIP] Too short`);
+      i = j;
       continue;
     }
 
@@ -269,14 +269,11 @@ function parseBCAStatement(text: string, currency: string) {
     }
 
     if (amounts.length === 0) {
-      if (datesFound <= 3) console.log(`[SKIP] No valid amounts found`);
+      i = j;
       continue;
     }
 
-    if (datesFound <= 3) console.log(`[FOUND] ${amounts.length} amounts: ${amounts.join(', ')}`);
-
     const isCredit = /\bCR\b/i.test(fullText);
-
     const amount = amounts[0];
     const balance = amounts.length > 1 ? amounts[amounts.length - 1] : null;
 
@@ -286,27 +283,31 @@ function parseBCAStatement(text: string, currency: string) {
       reference = refMatch[0];
     }
 
-    let description = fullText.replace(/\s+/g, ' ').trim();
+    const description = blockLines.join(' | ').substring(0, 500);
 
     const fullDate = `${year}-${String(mon).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 
     transactions.push({
       date: fullDate,
-      description: description.substring(0, 500),
-      reference: reference.substring(0, 100),
+      description,
+      reference,
       branchCode: '',
       debitAmount: isCredit ? 0 : amount,
       creditAmount: isCredit ? amount : 0,
       balance,
     });
 
-    i = endPos - 1;
+    if (transactions.length <= 5) {
+      console.log(`[TXN] ${day}/${mon}: ${description.substring(0, 120)}`);
+    }
+
+    i = j;
   }
 
   const totalDebits = transactions.reduce((s, t) => s + t.debitAmount, 0);
   const totalCredits = transactions.reduce((s, t) => s + t.creditAmount, 0);
 
-  console.log(`[RESULT] ${transactions.length} txns, DR:${totalDebits.toFixed(2)}, CR:${totalCredits.toFixed(2)}`);
+  console.log(`[RESULT] ${transactions.length} transactions, DR: ${totalDebits.toFixed(2)}, CR: ${totalCredits.toFixed(2)}`);
 
   return {
     period,
