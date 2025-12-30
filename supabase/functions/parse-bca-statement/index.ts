@@ -64,15 +64,26 @@ Deno.serve(async (req: Request) => {
     const uint8Array = new Uint8Array(arrayBuffer);
     
     const text = await extractTextFromPDF(uint8Array);
-    console.log('Extracted text length:', text.length);
-    console.log('First 500 chars:', text.substring(0, 500));
-    console.log('Looking for SALDO AWAL:', text.includes('SALDO AWAL'));
-    console.log('Looking for date pattern:', /\d{2}\/\d{2}/.test(text));
+    console.log('[DEBUG] Extracted text length:', text.length);
+    console.log('[DEBUG] First 1000 chars:', text.substring(0, 1000));
+    console.log('[DEBUG] Contains SALDO:', text.includes('SALDO'));
+    console.log('[DEBUG] Contains date pattern:', /\d{2}\/\d{2}/.test(text));
+    console.log('[DEBUG] Sample dates found:', text.match(/\d{2}\/\d{2}/g)?.slice(0, 5));
     
     const parsed = parseBCAStatement(text, bankAccount.currency);
+    console.log('[DEBUG] Parsed result:', JSON.stringify({
+      period: parsed.period,
+      transactionCount: parsed.transactions.length,
+      firstTransaction: parsed.transactions[0],
+      lastTransaction: parsed.transactions[parsed.transactions.length - 1]
+    }, null, 2));
     
     if (!parsed.transactions || parsed.transactions.length === 0) {
-      throw new Error('No transactions found in PDF. The file may be password-protected or corrupted.');
+      // Save debug info
+      const debugFile = `debug/${Date.now()}_extract.txt`;
+      await supabase.storage.from('bank-statements').upload(debugFile, text);
+      
+      throw new Error(`No transactions parsed. Text length: ${text.length}. Debug file saved. Please contact support.`);
     }
 
     const fileName = `${bankAccountId}/${Date.now()}_${file.name}`;
@@ -147,7 +158,7 @@ Deno.serve(async (req: Request) => {
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (error: any) {
-    console.error('Error parsing BCA statement:', error);
+    console.error('[ERROR] Parse error:', error);
     return new Response(
       JSON.stringify({ error: error.message || 'Failed to parse PDF' }),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -160,14 +171,12 @@ async function extractTextFromPDF(pdfData: Uint8Array): Promise<string> {
   const rawText = decoder.decode(pdfData);
   const parts: string[] = [];
 
-  // Extract text from PDF text objects
+  // Method 1: Extract from BT...ET blocks
   const textObjectRegex = /BT\s+([\s\S]+?)\s+ET/g;
   for (const match of rawText.matchAll(textObjectRegex)) {
     const content = match[1];
-    // Look for text in parentheses or angle brackets
     for (const strMatch of content.matchAll(/[\(\<]([^\)\>]+)[\)\>]/g)) {
       let text = strMatch[1];
-      // Handle escape sequences
       text = text.replace(/\\([\\()rnt])/g, (_, char) => {
         if (char === 'n') return ' ';
         if (char === 'r') return '';
@@ -185,7 +194,6 @@ async function extractTextFromPDF(pdfData: Uint8Array): Promise<string> {
 }
 
 function parseBCAStatement(text: string, currency: string) {
-  // Normalize spaces
   text = text.replace(/\s+/g, ' ');
 
   let period = '';
@@ -206,10 +214,6 @@ function parseBCAStatement(text: string, currency: string) {
   if (closingMatch) {
     closingBalance = parseAmount(closingMatch[1]);
   }
-
-  console.log('Period:', period);
-  console.log('Opening balance:', openingBalance);
-  console.log('Closing balance:', closingBalance);
 
   let startDate = '';
   let endDate = '';
@@ -238,59 +242,70 @@ function parseBCAStatement(text: string, currency: string) {
 
   const transactions: ParsedTransaction[] = [];
   
-  // BCA format: DD/MM DESCRIPTION... BRANCH_CODE AMOUNT DB/CR BALANCE
-  // More flexible pattern that captures everything between date and amount
-  const pattern = /(\d{2})\/(\d{2})\s+(.+?)\s+([\d,\.]+)\s+(DB|CR)?\s*(?:([\d,\.]+))?/gi;
+  // Split into potential transaction chunks
+  const chunks = text.split(/(?=\d{2}\/\d{2}\s)/);
+  console.log(`[DEBUG] Found ${chunks.length} chunks`);
   
-  let match;
-  let count = 0;
-  
-  while ((match = pattern.exec(text)) !== null) {
-    count++;
-    const day = match[1];
-    const month = match[2];
-    const desc = match[3];
-    const amountStr = match[4];
-    const indicator = match[5];
-    const balanceStr = match[6];
-
+  for (const chunk of chunks) {
+    const dateMatch = chunk.match(/^(\d{2})\/(\d{2})/);
+    if (!dateMatch) continue;
+    
+    const day = dateMatch[1];
+    const month = dateMatch[2];
     const dayNum = parseInt(day);
     const monthNumParsed = parseInt(month);
     
-    // Validate date
-    if (dayNum > 31 || monthNumParsed > 12 || dayNum < 1 || monthNumParsed < 1) {
-      continue;
+    if (dayNum > 31 || monthNumParsed > 12 || dayNum < 1 || monthNumParsed < 1) continue;
+    
+    // Skip headers
+    if (chunk.match(/TANGGAL|KETERANGAN|MUTASI|SALDO AWAL/i)) continue;
+    
+    // Try to find amounts - look for patterns like: 1.234.567,89 or 1234567.89
+    const amountMatches = chunk.match(/([\d,\.]+(?:,\d{2})?)/g);
+    if (!amountMatches || amountMatches.length === 0) continue;
+    
+    // Filter out the date itself
+    const amounts = amountMatches
+      .filter(a => !/^\d{2}$/.test(a))
+      .map(a => parseAmount(a))
+      .filter(a => a >= 1 && a < 100000000000);
+    
+    if (amounts.length === 0) continue;
+    
+    // Extract description (everything between date and first amount)
+    let description = chunk.substring(5).trim();
+    for (const amountStr of amountMatches) {
+      const idx = description.indexOf(amountStr);
+      if (idx > 0) {
+        description = description.substring(0, idx).trim();
+        break;
+      }
     }
     
-    // Skip header/footer lines
-    if (desc.match(/TANGGAL|KETERANGAN|MUTASI|SALDO AWAL|halaman|Bersambung/i)) {
-      continue;
-    }
-
+    description = description.replace(/[^A-Za-z0-9\s\-\/\.]/g, ' ').trim();
+    if (description.length < 3) description = 'Transaction';
+    
+    // Check for CR indicator
+    const isCredit = chunk.includes(' CR ');
+    const amount = amounts[0];
+    const balance = amounts.length > 1 ? amounts[amounts.length - 1] : null;
+    
     const fullDate = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-    const amount = parseAmount(amountStr);
-    const balance = balanceStr ? parseAmount(balanceStr) : null;
-    const isDebit = !indicator || indicator.toUpperCase() === 'DB';
-
-    // Only add valid transactions
-    if (amount > 0 && amount < 10000000000) {
-      transactions.push({
-        date: fullDate,
-        description: desc.trim().substring(0, 500),
-        branchCode: '',
-        debitAmount: isDebit ? amount : 0,
-        creditAmount: isDebit ? 0 : amount,
-        balance,
-      });
-    }
+    
+    transactions.push({
+      date: fullDate,
+      description: description.substring(0, 500),
+      branchCode: '',
+      debitAmount: isCredit ? 0 : amount,
+      creditAmount: isCredit ? amount : 0,
+      balance,
+    });
   }
-
-  console.log(`Found ${count} potential matches, ${transactions.length} valid transactions`);
 
   const totalDebits = transactions.reduce((sum, t) => sum + t.debitAmount, 0);
   const totalCredits = transactions.reduce((sum, t) => sum + t.creditAmount, 0);
 
-  console.log(`Total Debits: ${totalDebits}, Total Credits: ${totalCredits}`);
+  console.log(`[RESULT] ${transactions.length} transactions, DR: ${totalDebits}, CR: ${totalCredits}`);
 
   return {
     period,
@@ -312,21 +327,17 @@ function parseAmount(str: string): number {
   const dotCount = (cleaned.match(/\./g) || []).length;
   const commaCount = (cleaned.match(/,/g) || []).length;
   
-  // Indonesian format: 103.566.421,00 or 103,566,421.00
+  // Indonesian: 1.234.567,89 (dots = thousands, comma = decimal)
+  // US: 1,234,567.89 (commas = thousands, dot = decimal)
   if (dotCount > 1) {
-    // Dots are thousands separators, comma is decimal
     cleaned = cleaned.replace(/\./g, '').replace(',', '.');
   } else if (commaCount > 1) {
-    // Commas are thousands separators
     cleaned = cleaned.replace(/,/g, '');
   } else if (dotCount === 1 && commaCount === 1) {
-    // Mixed: assume dots are thousands
     cleaned = cleaned.replace(/\./g, '').replace(',', '.');
   } else if (commaCount === 1 && dotCount === 0) {
-    // Single comma could be decimal
     cleaned = cleaned.replace(',', '.');
   }
   
-  const result = parseFloat(cleaned) || 0;
-  return result;
+  return parseFloat(cleaned) || 0;
 }
