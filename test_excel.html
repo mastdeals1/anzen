@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+  <h1>Excel Structure Test</h1>
+  <input type="file" id="fileInput" accept=".xlsx,.xls">
+  <pre id="output"></pre>
+
+  <script>
+    document.getElementById('fileInput').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const data = event.target.result;
+        const workbook = XLSX.read(data, { type: 'binary' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+        let output = '=== EXCEL STRUCTURE ===\n\n';
+        output += `Total rows: ${jsonData.length}\n\n`;
+        output += 'First 20 rows:\n\n';
+
+        jsonData.slice(0, 20).forEach((row, i) => {
+          output += `Row ${i}: ${JSON.stringify(row)}\n`;
+        });
+
+        document.getElementById('output').textContent = output;
+        console.log('Full data:', jsonData);
+      };
+      reader.readAsBinaryString(file);
+    });
+  </script>
+</body>
+</html>
