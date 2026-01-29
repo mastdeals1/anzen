@@ -219,16 +219,6 @@ function FinanceContent() {
     }
   };
 
-  if (!t || !t.finance) {
-    return (
-      <Layout>
-        <div className="flex items-center justify-center h-screen">
-          <div className="text-gray-500">Loading...</div>
-        </div>
-      </Layout>
-    );
-  }
-
   return (
     <Layout>
       <div className="flex h-screen bg-gray-50">
