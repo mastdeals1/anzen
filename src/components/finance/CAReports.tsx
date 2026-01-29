@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
-import { Download, Calendar, FileText, TrendingUp, Package, Building2 } from 'lucide-react';
+import { Download, FileText, TrendingUp, Package, Building2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useAuth } from '../../contexts/AuthContext';
+import { useFinance } from '../../contexts/FinanceContext';
 
 type ReportType =
   | 'coa'
@@ -23,14 +24,17 @@ interface DateRange {
 
 export function CAReports() {
   const { profile } = useAuth();
-  const currentYear = new Date().getFullYear();
+  const { dateRange: contextDateRange } = useFinance();
   const [selectedReport, setSelectedReport] = useState<ReportType>('inventory_movement');
-  const [dateRange, setDateRange] = useState<DateRange>({
-    from: `${currentYear}-01-01`,
-    to: new Date().toISOString().split('T')[0]
-  });
   const [loading, setLoading] = useState(false);
   const [reportData, setReportData] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Use date range from context (master date picker)
+  const dateRange: DateRange = {
+    from: contextDateRange.startDate,
+    to: contextDateRange.endDate
+  };
 
   const reports = [
     { id: 'coa' as const, name: 'Chart of Accounts', icon: FileText, description: 'Complete COA list' },
@@ -49,10 +53,11 @@ export function CAReports() {
     if (selectedReport) {
       loadReportData();
     }
-  }, [selectedReport, dateRange]);
+  }, [selectedReport, contextDateRange.startDate, contextDateRange.endDate]);
 
   const loadReportData = async () => {
     setLoading(true);
+    setError(null);
     try {
       let data = null;
 
@@ -92,7 +97,7 @@ export function CAReports() {
       setReportData(data);
     } catch (error) {
       console.error('Error loading report:', error);
-      alert('Error loading report: ' + (error as any).message);
+      setError((error as any).message || 'Failed to load report');
     } finally {
       setLoading(false);
     }
@@ -209,7 +214,7 @@ export function CAReports() {
         tax_amount,
         total_amount,
         faktur_pajak_number,
-        customers(name)
+        customers(customer_name)
       `)
       .gte('invoice_date', dateRange.from)
       .lte('invoice_date', dateRange.to)
@@ -220,7 +225,7 @@ export function CAReports() {
     return data?.map(inv => ({
       invoice_date: inv.invoice_date,
       invoice_number: inv.invoice_number,
-      customer_name: (inv.customers as any)?.name,
+      customer_name: (inv.customers as any)?.customer_name,
       tax_invoice_no: inv.faktur_pajak_number,
       net_amount: inv.subtotal,
       ppn: inv.tax_amount,
@@ -239,7 +244,7 @@ export function CAReports() {
         tax_amount,
         total_amount,
         currency,
-        suppliers(name)
+        suppliers(supplier_name)
       `)
       .gte('po_date', dateRange.from)
       .lte('po_date', dateRange.to)
@@ -250,7 +255,7 @@ export function CAReports() {
     return data?.map(po => ({
       po_date: po.po_date,
       po_number: po.po_number,
-      supplier_name: (po.suppliers as any)?.name,
+      supplier_name: (po.suppliers as any)?.supplier_name,
       net_amount: po.subtotal,
       ppn: po.tax_amount,
       total_amount: po.total_amount,
@@ -283,7 +288,7 @@ export function CAReports() {
 
     const { data: products } = await supabase
       .from('products')
-      .select('id, product_code, name, unit');
+      .select('id, product_code, product_name, unit');
 
     if (!products) return [];
 
@@ -292,7 +297,7 @@ export function CAReports() {
     products.forEach(prod => {
       productMap.set(prod.id, {
         product_code: prod.product_code,
-        product_name: prod.name,
+        product_name: prod.product_name,
         unit: prod.unit || 'PCS',
         opening: 0,
         in_qty: 0,
@@ -327,7 +332,8 @@ export function CAReports() {
       prod.closing = prod.opening + prod.in_qty - prod.out_qty;
     });
 
-    return Array.from(productMap.values()).filter(p => p.opening !== 0 || p.in_qty !== 0 || p.out_qty !== 0);
+    // Return all products (not filtered) - useful to see full inventory picture
+    return Array.from(productMap.values());
   };
 
   const loadJournalRegister = async () => {
@@ -622,24 +628,6 @@ export function CAReports() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-slate-900">CA Reports - Tax Consultant Excel Exports</h2>
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-slate-500" />
-            <input
-              type="date"
-              value={dateRange.from}
-              onChange={(e) => setDateRange({ ...dateRange, from: e.target.value })}
-              className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-            />
-            <span className="text-slate-500">to</span>
-            <input
-              type="date"
-              value={dateRange.to}
-              onChange={(e) => setDateRange({ ...dateRange, to: e.target.value })}
-              className="px-3 py-2 border border-slate-300 rounded-lg text-sm"
-            />
-          </div>
-        </div>
       </div>
 
       <div className="grid grid-cols-5 gap-4">
@@ -688,6 +676,17 @@ export function CAReports() {
 
         {loading ? (
           <div className="text-center py-12 text-slate-500">Loading report...</div>
+        ) : error ? (
+          <div className="text-center py-12">
+            <div className="text-red-600 font-semibold mb-2">Error Loading Report</div>
+            <div className="text-slate-600">{error}</div>
+            <button
+              onClick={loadReportData}
+              className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+            >
+              Retry
+            </button>
+          </div>
         ) : !reportData || reportData.length === 0 ? (
           <div className="text-center py-12 text-slate-500">No data available for selected period</div>
         ) : (
