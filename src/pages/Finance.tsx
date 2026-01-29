@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Layout } from '../components/Layout';
 import { useAuth } from '../contexts/AuthContext';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -102,7 +102,11 @@ function FinanceContent() {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const canManage = profile?.role === 'admin' || profile?.role === 'accounts';
-  const financeMenu = getFinanceMenu(t);
+
+  const financeMenu = useMemo(() => {
+    if (!t || !t.finance) return [];
+    return getFinanceMenu(t);
+  }, [t]);
 
   const toggleGroup = (groupLabel: string) => {
     setCollapsedGroups(prev => {
@@ -171,7 +175,7 @@ function FinanceContent() {
       case 'payment':
         return <PaymentVoucherManager canManage={canManage} />;
       case 'journal':
-        return <div className="text-center p-8 text-gray-500">{t.finance.journal} - {t.common.loading}</div>;
+        return <div className="text-center p-8 text-gray-500">{t?.finance?.journal || 'Journal'} - {t?.common?.loading || 'Loading...'}</div>;
       case 'contra':
         return <FundTransferManager canManage={canManage} />;
       case 'expenses':
@@ -211,9 +215,19 @@ function FinanceContent() {
       case 'banks':
         return <BankAccountsManager canManage={canManage} />;
       default:
-        return <div className="text-center p-8 text-gray-500">{t.common.noData}</div>;
+        return <div className="text-center p-8 text-gray-500">{t?.common?.noData || 'No data available'}</div>;
     }
   };
+
+  if (!t || !t.finance) {
+    return (
+      <Layout>
+        <div className="flex items-center justify-center h-screen">
+          <div className="text-gray-500">Loading...</div>
+        </div>
+      </Layout>
+    );
+  }
 
   return (
     <Layout>
