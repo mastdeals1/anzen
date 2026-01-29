@@ -514,30 +514,6 @@ export function PettyCashManager({ canManage, onNavigateToFundTransfer }: PettyC
     }
 
     try {
-      let documentUrls: string[] = [];
-
-      if (uploadingFiles.length > 0) {
-        const uploadPromises = uploadingFiles.map(async (file) => {
-          const fileExt = file.name.split('.').pop();
-          const fileName = `${Math.random().toString(36).substring(2)}.${fileExt}`;
-          const filePath = `${fileName}`;
-
-          const { error: uploadError, data } = await supabase.storage
-            .from('petty_cash_receipts')
-            .upload(filePath, file);
-
-          if (uploadError) throw uploadError;
-
-          const { data: { publicUrl } } = supabase.storage
-            .from('petty_cash_receipts')
-            .getPublicUrl(filePath);
-
-          return publicUrl;
-        });
-
-        documentUrls = await Promise.all(uploadPromises);
-      }
-
       const payload = {
         transaction_type: formData.transaction_type,
         transaction_date: formData.transaction_date,
@@ -551,8 +527,9 @@ export function PettyCashManager({ canManage, onNavigateToFundTransfer }: PettyC
         received_by_staff_name: formData.transaction_type === 'withdraw' ? formData.received_by_staff_name : null,
         import_container_id: formData.import_container_id || null,
         delivery_challan_id: formData.delivery_challan_id || null,
-        document_urls: documentUrls.length > 0 ? documentUrls : null,
       };
+
+      let transactionId: string;
 
       if (editingTransaction) {
         const { error } = await supabase
@@ -561,16 +538,54 @@ export function PettyCashManager({ canManage, onNavigateToFundTransfer }: PettyC
           .eq('id', editingTransaction.id);
 
         if (error) throw error;
-        alert('Petty cash transaction updated successfully!');
+        transactionId = editingTransaction.id;
       } else {
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from('petty_cash_transactions')
-          .insert([payload]);
+          .insert([payload])
+          .select('id')
+          .single();
 
         if (error) throw error;
-        alert('Petty cash transaction added successfully!');
+        if (!data) throw new Error('Failed to create transaction');
+        transactionId = data.id;
       }
 
+      // Upload documents if any
+      if (uploadingFiles.length > 0) {
+        const uploadPromises = uploadingFiles.map(async (file) => {
+          const fileExt = file.name.split('.').pop();
+          const fileName = `${transactionId}_${Date.now()}.${fileExt}`;
+          const filePath = `${fileName}`;
+
+          const { error: uploadError } = await supabase.storage
+            .from('petty-cash-receipts')
+            .upload(filePath, file);
+
+          if (uploadError) throw uploadError;
+
+          const { data: { publicUrl } } = supabase.storage
+            .from('petty-cash-receipts')
+            .getPublicUrl(filePath);
+
+          // Save document record
+          const { error: docError } = await supabase
+            .from('petty_cash_documents')
+            .insert([{
+              petty_cash_transaction_id: transactionId,
+              file_type: file.type,
+              file_name: file.name,
+              file_url: publicUrl,
+              file_size: file.size,
+            }]);
+
+          if (docError) throw docError;
+        });
+
+        await Promise.all(uploadPromises);
+      }
+
+      alert(editingTransaction ? 'Petty cash transaction updated successfully!' : 'Petty cash transaction added successfully!');
       setModalOpen(false);
       loadData();
     } catch (error: any) {
